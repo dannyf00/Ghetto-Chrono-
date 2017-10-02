@@ -4,6 +4,7 @@
 //#define PORTB			PORTB
 //#define PORTA			PORTA
 //digit definitions
+#if 0					//led display on top of the IC, left to right orientation (ic pin1=led pin1)
 #define DIG1_PORT		PORTC
 #define DIG1_DDR		DDRC
 #define DIG1			(1<<5)
@@ -53,6 +54,59 @@
 #define SEGDP_PORT		PORTD
 #define SEGDP_DDR		DDRD
 #define SEGDP			(1<<1)
+
+#else					//led on top of the ic, right to left orientation (IC pin1=led pin7)
+
+#define DIG1_PORT		PORTD
+#define DIG1_DDR		DDRD
+#define DIG1			(1<<4)
+
+#define DIG2_PORT		PORTD
+#define DIG2_DDR		DDRD
+#define DIG2			(1<<1)
+
+#define DIG3_PORT		PORTD
+#define DIG3_DDR		DDRD
+#define DIG3			(1<<0)
+
+#define DIG4_PORT		PORTC
+#define DIG4_DDR		DDRC
+#define DIG4			(1<<5)
+
+//segment definitions
+//map 4-digit led display to pic16f1936 direction
+#define SEGA_PORT		PORTD
+#define SEGA_DDR		DDRD
+#define SEGA			(1<<3)
+
+#define SEGB_PORT		PORTD
+#define SEGB_DDR		DDRD
+#define SEGB			(1<<5)
+
+#define SEGC_PORT		PORTC
+#define SEGC_DDR		DDRC
+#define SEGC			(1<<3)
+
+#define SEGD_PORT		PORTC
+#define SEGD_DDR		DDRC
+#define SEGD			(1<<1)
+
+#define SEGE_PORT		PORTC
+#define SEGE_DDR		DDRC
+#define SEGE			(1<<0)
+
+#define SEGF_PORT		PORTD
+#define SEGF_DDR		DDRD
+#define SEGF			(1<<2)
+
+#define SEGG_PORT		PORTC
+#define SEGG_DDR		DDRC
+#define SEGG			(1<<4)
+
+#define SEGDP_PORT		PORTC
+#define SEGDP_DDR		DDRC
+#define SEGDP			(1<<2)
+#endif
 //end hardware configuration
 
 //digit control - active high (Common Anode) or active low (Common Cathode)
@@ -160,8 +214,8 @@ void led_display(void) {
 	DIG_OFF(DIG3_PORT, DIG3);
 	DIG_OFF(DIG4_PORT, DIG4);
 
-	tmp=ledfont_num[lRAM[dig]];					//retrieve font / segment info from the display buffer
-	//tmp = lRAM[dig];							//alternative: if user fills the display buffer lRAM[] with segment information
+	//tmp=ledfont_num[lRAM[dig]];					//retrieve font / segment info from the display buffer
+	tmp = lRAM[dig];							//alternative: if user fills the display buffer lRAM[] with segment information
 	//turn on/off the segments
 	if (tmp & 0x01) SEG_ON(SEGA_PORT, SEGA); else SEG_OFF(SEGA_PORT, SEGA);
 	if (tmp & 0x02) SEG_ON(SEGB_PORT, SEGB); else SEG_OFF(SEGB_PORT, SEGB);

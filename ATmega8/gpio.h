@@ -53,9 +53,10 @@
 	#define di()			cli()				//disable interrupt
 #endif
 
-#ifndef F_CPU
-	#define F_CPU			1000000ul			//cpu runs at 1Mhz
+#ifdef F_CPU
+	#undef F_CPU
 #endif
+#define F_CPU				4000000ul			//cpu runs at 1Mhz
 
 //void (*mcu_reset)(void) = 0x0000; 			//jump to 0x0000 -> software reset
 void mcu_init(void);
