@@ -12,16 +12,9 @@
 #define CHRONO					(1<<0)		//ICP1 on PB0
 
 //status indicators - active high
-//status:
-//both indicators on: ready to receive data
-//LED_START on: both _start and _stop measurements have been taken. ready to take the next measurements.
-//LED_START off: first measurement has been taken, but second measurement not yet
-//if LED_START is stuck in "off", reset the chrono
-#define LED_PORT				PORTB
-#define LED_DDR					DDRB
-#define LED_START				(1<<1)		//start led on PB1
-#define LED_STOP				(0<<2)		//stop led on PB? - not used
-
+//status: DP of the first digit.
+//normally off; ON when the first signal arrives, off when the 2nd signal arrives.
+//if the indicator remains on, needs to reset the chrono
 #define CHRONO_PS				TMR1PS_1x	//tmr1 prescaler
 #define CHRONO_DISTANCE			1234		//chrono sensor distance, x10mm (1234=123.4mm)
 #define CHRONO_TRIGGER			RISING		//input capture on rising / falling edge
@@ -50,8 +43,34 @@
 #define LED_OFF(LEDs)			IO_CLR(LED_PORT, LEDs)
 
 //global variables
-volatile uint16_t chrono_ticks=0;			//ticks elapsed between start / end
+volatile uint32_t chrono_ticks=0;			//ticks elapsed between start / end
 volatile char chrono_available=0;			//data availability flag. 1=new data available, 0=no new data available
+volatile uint32_t ticks=0;					//32-bit ticks
+
+//tmr1 overflow isr
+ISR(TIMER1_OVF_vect) {
+	//clear the flag - done automatically
+	ticks += 0x10000ul;						//tmr1 is 16-bit wide
+}
+
+//tmr1 capture isr
+ISR(TIMER1_CAPT_vect) {
+	static uint32_t chrono_start, chrono_end;
+	static char chrono_ch=0;				//chrono input channel. 0=>put ICR1 into start, 1->put ICR1 input end
+
+	//clear the flag -> done automatically
+	if ((chrono_ch++ & 0x01)==0) {			//ch = 0 right now -> ICR1 to start
+		chrono_start = ticks | ICR1;				//save ICR1 to chrono_start
+		//LED_OFF(LED_START);					//turn off the start led
+		lRAM[0] |= 0x80;					//set the decimal point for the first digit
+	} else {								//ch = 1 right now -> ICR1 to end
+		chrono_end = ticks | ICR1;					//save ICR1 to end
+		chrono_ticks = chrono_end - chrono_start;	//calculate ticks elapsed
+		chrono_available = 1;				//1->new data available
+		//LED_OFF(LED_STOP); 					//turn off the stop led
+		lRAM[0] &=~0x80;					//turn off the decimal point for the first digit
+	}
+}
 
 //conversion routines
 //converting ticks to us
@@ -91,35 +110,18 @@ uint32_t ticks2fpsx10(uint32_t ticks) {
 	return ticks2mpsx10(ticks) * 32804ul/10000;			//1meter = 3.28084
 }
 
-//tmr1 capture isr
-ISR(TIMER1_CAPT_vect) {
-	static uint16_t chrono_start, chrono_end;
-	static char chrono_ch=0;				//chrono input channel. 0=>put ICR1 into start, 1->put ICR1 input end
-
-	//clear the flag -> done automatically
-	if ((chrono_ch++ & 0x01)==0) {			//ch = 0 right now -> ICR1 to start
-		chrono_start = ICR1;				//save ICR1 to chrono_start
-		LED_OFF(LED_START);					//turn off the start led
-	} else {								//ch = 1 right now -> ICR1 to end
-		chrono_end = ICR1;					//save ICR1 to end
-		chrono_ticks = chrono_end - chrono_start;	//calculate ticks elapsed
-		chrono_available = 1;				//1->new data available
-		LED_OFF(LED_STOP); 					//turn off the stop led
-	}
-}
-
 //reset the chrono
 //tmr1 free running, no overflow interrupt
 //ICP1 at 1x sampling.
 void chrono_init(void) {
 	//reset chrono variables
-	chrono_ticks = 0;
+	ticks = chrono_ticks = 0;
 	chrono_available = 0;					//no new data
 
 	//set up the indicators
 	//led_start / _stop as output, on
-	LED_ON(LED_START | LED_STOP);
-	IO_OUT(LED_DDR, LED_START | LED_STOP);
+	//LED_ON(LED_START | LED_STOP);
+	//IO_OUT(LED_DDR, LED_START | LED_STOP);
 
 	//chrono input pin as input, with pull-up enabled
 	IO_IN(CHRONO_DDR, CHRONO); 				//pin as input
@@ -142,8 +144,8 @@ void chrono_init(void) {
 #endif
 
 	//enable tmr1 input capture interrupt
-	TIFR |= (1<<ICF1);						//1->clear the flag
-	TIMSK |= (1<<TICIE1);					//1->enable the input capture interrupt
+	TIFR |= (1<<ICF1) | (1<<TOV1);			//1->clear the flag
+	TIMSK |= (1<<TICIE1) | (1<<TOIE1);					//1->enable the input capture interrupt
 
 	//start tmr1
 	TCCR1B = (TCCR1B & ~0x07) | (CHRONO_PS & 0x07);	//start timer on 1x prescaler
@@ -186,9 +188,10 @@ int main(void) {
 		//chrono_available=1;
 		if (chrono_available) {
 			chrono_available = 0;
-			//chrono_ticks = 1000;								//for debugging only - to make sure that the math is correct
+			//chrono_ticks = 8307674ul;								//for debugging only - to make sure that the math is correct
+			//tmp = cnt++;
 			//pick the variable to display
-			tmp = chrono_ticks;
+			tmp = chrono_ticks % 10000;
 			//tmp = ticks2usx10(chrono_ticks);					//1000 ticks@8Mhz -> 125us
 			//tmp = ticks2mpsx10_fp(chrono_ticks);				//123.4mm/125us=987.2, displayed as 987.2. very minor flickering at 1Mhz
 			//tmp = ticks2mpsx10(chrono_ticks);					//123.4mm/125us=987.2, displayed as 987. no flickering at 1Mhz. with rouding.
@@ -204,16 +207,16 @@ int main(void) {
 			//display tmp by forming the string in display buffer lRAM[]
 #ifdef FAST_MATH
 			//faster display routine - no flicker at 1Mhz
-			tmp1=0; while (tmp >= 1000) {tmp -=1000; tmp1+=1;}; lRAM[0]=tmp1; lRAM[0]=ledfont_num[tmp1];
-			tmp1=0; while (tmp >=  100) {tmp -= 100; tmp1+=1;}; lRAM[1]=tmp1; lRAM[1]=ledfont_num[tmp1];
-			tmp1=0; while (tmp >=   10) {tmp -=  10; tmp1+=1;}; lRAM[2]=tmp1; lRAM[2]=ledfont_num[tmp1];
-			/*tmp1=0; while (tmp >= 0001) {tmp -=0001; tmp1+=1;}; */lRAM[3]=tmp; lRAM[3]=ledfont_num[tmp];
+			tmp1=0; while (tmp >= 1000) {tmp -=1000; tmp1+=1;}; lRAM[0]=ledfont_num[tmp1] | (lRAM[0] & 0x80);
+			tmp1=0; while (tmp >=  100) {tmp -= 100; tmp1+=1;}; lRAM[1]=ledfont_num[tmp1];
+			tmp1=0; while (tmp >=   10) {tmp -=  10; tmp1+=1;}; lRAM[2]=ledfont_num[tmp1];
+			/*tmp1=0; while (tmp >= 0001) {tmp -=0001; tmp1+=1;}; */lRAM[3]=ledfont_num[tmp];
 #else
 			//slower display routine - slight flicker at 1Mhz
 			lRAM[3]=ledfont_num[(tmp % 10) + 0]; tmp /= 10;
 			lRAM[2]=ledfont_num[(tmp % 10) + 0]; tmp /= 10;
 			lRAM[1]=ledfont_num[(tmp % 10) + 0]; tmp /= 10;
-			lRAM[0]=ledfont_num[(tmp % 10) + 0]; tmp /= 10;
+			lRAM[0]=ledfont_num[(tmp % 10) + 0] | (lRAM[0] & 0x80); tmp /= 10;
 #endif
 #if defined(CHRONO_DP)
 			//display the decimal point
@@ -222,7 +225,7 @@ int main(void) {
 				case 3: lRAM[3]|=0x80; break;					//decimal point on digit 4
 			}
 #endif
-			LED_ON(LED_START | LED_STOP);						//turn on both leds to indicate ready to fire status
+			//LED_ON(LED_START | LED_STOP);						//turn on both leds to indicate ready to fire status
 		}
 
 		//blanking here if needed
